@@ -41,17 +41,17 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.example.obs-plugintemplate"
+            "bundleId": "com.aglab.obs-emuspy"
         }
     },
-    "name": "obs-plugintemplate",
+    "name": "obs-emuspy",
     "version": "1.0.0",
-    "author": "Your Name Here",
-    "website": "https://example.com",
-    "email": "me@example.com",
+    "author": "aglab2",
+    "website": "https://github.com/aglab2",
+    "email": "aglab3@gmail.com",
     "uuids": {
-        "macosPackage": "00000000-0000-0000-0000-000000000000",
-        "macosInstaller": "00000000-0000-0000-0000-000000000000",
-        "windowsApp": "00000000-0000-0000-0000-000000000000"
+        "macosPackage": "a8e225b1-4e25-411e-a848-1466ac489e24",
+        "macosInstaller": "2e479876-48db-444e-947d-298233ca5c06",
+        "windowsApp": "e8dfecf1-9569-4121-9e99-b338e6862b18"
     }
 }
