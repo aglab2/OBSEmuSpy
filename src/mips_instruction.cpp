@@ -3,8 +3,7 @@
 #include <iomanip>
 #include <sstream>
 
-namespace MIPS
-{
+namespace MIPS {
 std::string intToHexString(uint32_t value, int width = 0)
 {
 	std::ostringstream stream;

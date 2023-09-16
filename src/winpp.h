@@ -24,7 +24,7 @@ public:
 	WinHandle &operator=(const WinHandle &) = delete;
 	WinHandle(const WinHandle &) = delete;
 
-	WinHandle &operator=(WinHandle && o) noexcept
+	WinHandle &operator=(WinHandle &&o) noexcept
 	{
 		clear();
 		handle_ = o.handle_;

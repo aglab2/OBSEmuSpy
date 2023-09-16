@@ -27,7 +27,7 @@ public:
 
 private:
 	static const std::map<Cmd, Interpreter::Performer> sCmdToFunc;
-	
+
 	void Add(const Instruction &inst);
 	void AddI(const Instruction &inst);
 	void And(const Instruction &inst);
@@ -68,3 +68,4 @@ private:
 	void XorI(const Instruction &inst);
 };
 }
+

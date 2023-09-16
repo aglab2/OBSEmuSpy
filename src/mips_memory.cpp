@@ -6,11 +6,13 @@
 #include "mips_memory.h"
 
 namespace MIPS {
-bool Memory::isValidStackIndex(uint32_t index) {
+bool Memory::isValidStackIndex(uint32_t index)
+{
 	return index < 0x4000;
 }
 
-bool Memory::isValidRamIndex(uint32_t index) {
+bool Memory::isValidRamIndex(uint32_t index)
+{
 	return index < ram_.size();
 }
 
@@ -24,8 +26,7 @@ uint32_t Memory::read(uint32_t vAddr)
 		if (isValidRamIndex(off)) {
 			return ram_[off];
 		} else {
-			throw std::runtime_error(
-				"RAM index out of bounds");
+			throw std::runtime_error("RAM index out of bounds");
 		}
 	}
 
@@ -33,13 +34,11 @@ uint32_t Memory::read(uint32_t vAddr)
 		if (isValidStackIndex(off)) {
 			return stack_[off];
 		} else {
-			throw std::runtime_error(
-				"Stack index out of bounds");
+			throw std::runtime_error("Stack index out of bounds");
 		}
 	}
 
-	throw std::runtime_error("Unknown segment " +
-					std::to_string(seg));
+	throw std::runtime_error("Unknown segment " + std::to_string(seg));
 }
 
 void Memory::write(int vAddr, uint8_t val, int dataOff)
@@ -71,8 +70,7 @@ void Memory::write(uint32_t vAddr, uint8_t val, int dataOff)
 			// ram_[off] = data;
 			return;
 		} else {
-			throw std::runtime_error(
-				"RAM index out of bounds");
+			throw std::runtime_error("RAM index out of bounds");
 		}
 	}
 
@@ -81,17 +79,15 @@ void Memory::write(uint32_t vAddr, uint8_t val, int dataOff)
 			uint32_t data = stack_[off];
 			data &= (0xffU << (24 - 8 * dataOff));
 			data |= (static_cast<uint32_t>(val)
-					<< (24 - 8 * dataOff));
+				 << (24 - 8 * dataOff));
 			stack_[off] = data;
 			return;
 		} else {
-			throw std::runtime_error(
-				"Stack index out of bounds");
+			throw std::runtime_error("Stack index out of bounds");
 		}
 	}
 
-	throw std::runtime_error("Unknown segment " +
-					std::to_string(seg));
+	throw std::runtime_error("Unknown segment " + std::to_string(seg));
 }
 
 void Memory::write(uint32_t vAddr, uint16_t val, int dataOff)
@@ -108,8 +104,7 @@ void Memory::write(uint32_t vAddr, uint16_t val, int dataOff)
 			// ram_[off] = data;
 			return;
 		} else {
-			throw std::runtime_error(
-				"RAM index out of bounds");
+			throw std::runtime_error("RAM index out of bounds");
 		}
 	}
 
@@ -118,17 +113,15 @@ void Memory::write(uint32_t vAddr, uint16_t val, int dataOff)
 			uint32_t data = stack_[off];
 			data &= (0xffU << (16 - 16 * dataOff));
 			data |= (static_cast<uint32_t>(val)
-					<< (16 - 16 * dataOff));
+				 << (16 - 16 * dataOff));
 			stack_[off] = data;
 			return;
 		} else {
-			throw std::runtime_error(
-				"Stack index out of bounds");
+			throw std::runtime_error("Stack index out of bounds");
 		}
 	}
 
-	throw std::runtime_error("Unknown segment " +
-					std::to_string(seg));
+	throw std::runtime_error("Unknown segment " + std::to_string(seg));
 }
 
 void Memory::write(uint32_t vAddr, uint32_t val)
@@ -142,8 +135,7 @@ void Memory::write(uint32_t vAddr, uint32_t val)
 			// ram_[off] = val;
 			return;
 		} else {
-			throw std::runtime_error(
-				"RAM index out of bounds");
+			throw std::runtime_error("RAM index out of bounds");
 		}
 	}
 
@@ -152,12 +144,10 @@ void Memory::write(uint32_t vAddr, uint32_t val)
 			stack_[off] = val;
 			return;
 		} else {
-			throw std::runtime_error(
-				"Stack index out of bounds");
+			throw std::runtime_error("Stack index out of bounds");
 		}
 	}
 
-	throw std::runtime_error("Unknown segment " +
-					std::to_string(seg));
+	throw std::runtime_error("Unknown segment " + std::to_string(seg));
 }
 }
