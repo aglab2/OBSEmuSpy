@@ -34,6 +34,6 @@ if(ENABLE_QT)
                AUTORCC ON)
 endif()
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.cpp src/dispatch_queue.cpp src/dispatch_queue.h src/emulator.cpp src/emulator.h src/emuspy-source.cpp src/emuspy-source.h src/image.h src/input.h src/skin.cpp src/skin.h src/tinyxml2.cpp src/tinyxml2.h)
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.cpp src/dispatch_queue.cpp src/dispatch_queue.hsrc/emulator.cpp src/emulator.h src/emuspy-source.cpp src/emuspy-source.h src/image.h src/input.h src/skin.cpp src/skin.h src/tinyxml2.cpp src/tinyxml2.h)
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
