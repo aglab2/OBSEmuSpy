@@ -45,6 +45,16 @@ static uint32_t emuspy_get_height(void *data)
 	return reinterpret_cast<EmuSpy *>(data)->height();
 }
 
+static void emuspy_activate(void *data)
+{
+	return reinterpret_cast<EmuSpy *>(data)->activate();
+}
+
+static void emuspy_deactivate(void *data)
+{
+	return reinterpret_cast<EmuSpy *>(data)->deactivate();
+}
+
 obs_source_info EmuSpy::makeOBSSourceInfo()
 {
 	obs_source_info src{};
@@ -62,6 +72,8 @@ obs_source_info EmuSpy::makeOBSSourceInfo()
 	src.video_render = emuspy_video_render;
 	src.get_width = emuspy_get_width;
 	src.get_height = emuspy_get_height;
+	src.activate = emuspy_activate;
+	src.deactivate = emuspy_deactivate;
 
 	return src;
 }
@@ -150,7 +162,9 @@ try {
 		}
 
 		if (auto skin = std::atomic_load(&skin_)) {
-			skin->render(input_.load());
+			Input input;
+			*(int32_t *)&input = emulator_->getInputs();
+			skin->render(input);
 		}
 	}
 
@@ -187,4 +201,16 @@ try {
 	return bg ? bg->cy() : 0;
 } catch (...) {
 	return 0;
+}
+
+void EmuSpy::activate()
+try {
+	emulator_ = std::make_shared<Emulator>();
+} catch (...) {
+}
+
+void EmuSpy::deactivate()
+try {
+	gTeardownQueue->async([emu{std::move(emulator_)}]() {});
+} catch (...) {
 }

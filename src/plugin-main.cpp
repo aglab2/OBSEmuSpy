@@ -31,6 +31,8 @@ bool obs_module_load(void)
 		PLUGIN_VERSION);
 
 	gTeardownQueue = new QueueExecutor;
+	gTeardownQueue->start();
+
 	obs_source_info emuSpySource = EmuSpy::makeOBSSourceInfo();
 	obs_register_source(&emuSpySource);
 	return true;

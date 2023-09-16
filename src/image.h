@@ -1,3 +1,5 @@
+#pragma once
+
 #include <graphics/image-file.h>
 #include <obs.h>
 

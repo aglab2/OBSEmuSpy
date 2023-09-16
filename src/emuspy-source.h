@@ -1,5 +1,8 @@
+#pragma once
+
 #include <obs-module.h>
 
+#include "emulator.h"
 #include "skin.h"
 
 #include <atomic>
@@ -16,6 +19,8 @@ public:
 	uint32_t width();
 	uint32_t height();
 	obs_properties_t *getProperties();
+	void activate();
+	void deactivate();
 
 private:
 	static bool skinSelectedProxy(void *priv, obs_properties_t *props,
@@ -28,7 +33,7 @@ private:
 	bool bgSelected(obs_properties_t *props, obs_property_t *p,
 			obs_data_t *settings);
 
-	std::atomic<Input> input_;
+	std::shared_ptr<Emulator> emulator_;
 	std::shared_ptr<Image> bg_;
 	std::shared_ptr<Skin> skin_;
 };

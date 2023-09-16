@@ -1,4 +1,5 @@
 #include "skin.h"
+#include "skin.h"
 
 #include "tinyxml2.h"
 
@@ -87,6 +88,10 @@ Skin::Button::Name Skin::Button::toName(std::string str)
 		return Name::B;
 	if (str == "z")
 		return Name::Z;
+	if (str == "r")
+		return Name::R;
+	if (str == "l")
+		return Name::L;
 	if (str == "start")
 		return Name::Start;
 	if (str == "cup")
@@ -189,9 +194,12 @@ Skin::Skin(const char *_path)
 		}
 }
 
-void Skin::render(Input)
+void Skin::render(Input input)
 {
 	for (const auto &button : buttons_) {
+		if (!(input.flags & (1 << (int)button.name)))
+			continue;
+
 		auto &image = button.image;
 		obs_source_draw(image.texture(), button.pos.x, button.pos.y,
 				button.size.x ? button.size.x : image.cx(),
@@ -200,8 +208,16 @@ void Skin::render(Input)
 	}
 
 	for (const auto &stick : sticks_) {
+		float offX =
+			(stick.nameX == Stick::Name::X ? input.x : input.y) /
+			127.f;
+		float offY =
+			(stick.nameY == Stick::Name::X ? input.x : input.y) /
+			127.f;
 		auto &image = stick.image;
-		obs_source_draw(image.texture(), stick.pos.x, stick.pos.y,
+		obs_source_draw(image.texture(),
+				stick.pos.x + (int)(stick.range.x * offX),
+				stick.pos.y - (int)(stick.range.y * offY),
 				stick.size.x ? stick.size.x : image.cx(),
 				stick.size.y ? stick.size.y : image.cy(),
 				false);

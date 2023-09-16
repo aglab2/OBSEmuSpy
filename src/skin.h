@@ -1,3 +1,5 @@
+#pragma once
+
 #include <graphics/image-file.h>
 #include <obs.h>
 
@@ -32,20 +34,23 @@ public:
 
 	struct Button {
 		enum class Name {
-			A,
-			B,
-			Z,
-			Start,
-			CUp,
-			CDown,
-			CLeft,
 			CRight,
+			CLeft,
+			CDown,
+			CUp,
 			R,
 			L,
-			Up,
-			Down,
+			X, // reserved...
+			Y,
+
+			Right,
 			Left,
-			Right
+			Down,
+			Up,
+			Start,
+			Z,
+			B,
+			A,
 		};
 		static Name toName(std::string str);
 
