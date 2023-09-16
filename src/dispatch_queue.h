@@ -17,8 +17,7 @@ public:
 
 	SynchImports()
 	{
-		hmodSynch_ =
-			LoadLibraryA("API-MS-Win-Core-Synch-l1-2-0.dll");
+		hmodSynch_ = LoadLibraryA("API-MS-Win-Core-Synch-l1-2-0.dll");
 		waitOnAddress_ =
 			(WOA_ADDR)GetProcAddress(hmodSynch_, "WaitOnAddress");
 		wakeByAddressSingle_ = (WBAS_ADDR)GetProcAddress(
@@ -183,4 +182,4 @@ private:
 	void asyncInternal(Fn fn);
 };
 
-extern QueueExecutor* gTeardownQueue;
+extern QueueExecutor *gTeardownQueue;
