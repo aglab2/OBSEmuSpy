@@ -68,4 +68,3 @@ private:
 	void XorI(const Instruction &inst);
 };
 }
-
