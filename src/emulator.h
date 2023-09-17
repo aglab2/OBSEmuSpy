@@ -30,10 +30,19 @@ private:
 	void markProcessDead();
 	void markRAMDead();
 
+	bool probeRAMAddress(void *);
+
 	std::atomic<int32_t> inputs_;
+
+	enum EmulatorType {
+		UNKNOWN,
+		PJ64,
+		RETROARCH,
+	};
 
 	uint32_t pid_; // diagnostics only...
 	WinHandle process_;
+	EmulatorType type_ = EmulatorType::UNKNOWN;
 	BOOL processIs64Bit_ = false;
 	uint8_t *ramPtrBase_ = nullptr;
 	std::optional<MIPS::AnalyzeResult> analyzeResult_;

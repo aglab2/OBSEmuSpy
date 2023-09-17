@@ -18,6 +18,22 @@ Emulator::~Emulator()
 	thread_.join();
 }
 
+static std::string moduleNameLowerCase(HANDLE process, HMODULE module)
+{
+	std::string name;
+	name.resize(MAX_PATH);
+	int len = GetModuleBaseNameA(process, module, name.data(),
+				     (DWORD)name.size());
+	if (0 == len)
+		return {};
+
+	name.resize(len);
+	std::transform(name.begin(), name.end(), name.begin(),
+		       [](unsigned char c) { return std::tolower(c); });
+
+	return name;
+}
+
 void Emulator::searchProcess()
 {
 	msToWait_ = 1000;
@@ -38,29 +54,41 @@ void Emulator::searchProcess()
 		if (!process)
 			continue;
 
-		HMODULE mod;
+		HMODULE mainModule;
 		DWORD needed;
-		if (!EnumProcessModules(process, &mod, sizeof(HMODULE),
+		if (!EnumProcessModules(process, &mainModule, sizeof(HMODULE),
 					&needed))
 			continue;
 
-		char name[MAX_PATH];
-		name[0] = 0;
-		GetModuleBaseNameA(process, mod, name,
-				   sizeof(name) / sizeof(TCHAR));
-
-		std::string nameStr{name};
-		std::transform(nameStr.begin(), nameStr.end(), nameStr.begin(),
-			       [](unsigned char c) { return std::tolower(c); });
-
-		if (nameStr != "project64.exe" && nameStr != "retroarch.exe")
+		std::string name = moduleNameLowerCase(process, mainModule);
+		bool pj64 = name == "project64.exe";
+		bool retroarch = name == "retroarch.exe";
+		if (!pj64 && !retroarch)
 			continue;
 
+		type_ = pj64 ? EmulatorType::PJ64 : EmulatorType::RETROARCH;
 		pid_ = pid;
 		process_ = std::move(process);
 		IsWow64Process(process_, &processIs64Bit_);
 		break;
 	}
+}
+
+bool Emulator::probeRAMAddress(void *ramPtrBaseCandidate)
+{
+	const uint32_t ramMagic = 0x3C1A8000;
+	const uint32_t ramMagicMask = 0xfffff000;
+
+	uint32_t value;
+	if (!ReadProcessMemory(process_, ramPtrBaseCandidate, &value,
+			       sizeof(value), nullptr))
+		return false;
+
+	if ((value & ramMagicMask) == ramMagic) {
+		return true;
+	}
+
+	return false;
 }
 
 void Emulator::scanProcessRAM()
@@ -74,67 +102,71 @@ void Emulator::scanProcessRAM()
 	PVOID MaxAddress = processIs64Bit_ ? (PVOID)0x800000000000ULL
 					   : (PVOID)0xffffffffULL;
 	PVOID address = nullptr;
-	int offset = 0;
-	const uint32_t ramMagic = 0x3C1A8000;
-	const uint32_t ramMagicMask = 0xfffff000;
+	const int offset = 0; // TODO: Change for mupen
 	uint8_t *ramPtrBase = nullptr;
-	do {
-		MEMORY_BASIC_INFORMATION m;
-		SIZE_T mbiSize = sizeof(m);
-		SIZE_T result = VirtualQueryEx(process_, address, &m, mbiSize);
-		if (address == (char *)m.BaseAddress + m.RegionSize ||
-		    result == 0)
-			break;
 
-		DWORD prot = m.Protect & 0xff;
-		if (prot == PAGE_EXECUTE_READWRITE ||
-		    prot == PAGE_EXECUTE_WRITECOPY || prot == PAGE_READWRITE ||
-		    prot == PAGE_WRITECOPY || prot == PAGE_READONLY) {
-			uint32_t value;
-			uint8_t *ramPtrBaseCandidate =
-				(uint8_t *)m.BaseAddress + offset;
-			BOOL readSuccess = ReadProcessMemory(
-				process_, ramPtrBaseCandidate, &value,
-				sizeof(value), nullptr);
-			if (readSuccess) {
-				if ((value & ramMagicMask) == ramMagic) {
+	if (type_ == EmulatorType::PJ64) {
+		do {
+			MEMORY_BASIC_INFORMATION m;
+			SIZE_T mbiSize = sizeof(m);
+			SIZE_T result =
+				VirtualQueryEx(process_, address, &m, mbiSize);
+			if (address == (char *)m.BaseAddress + m.RegionSize ||
+			    result == 0)
+				break;
+
+			DWORD prot = m.Protect & 0xff;
+			if (prot == PAGE_EXECUTE_READWRITE ||
+			    prot == PAGE_EXECUTE_WRITECOPY ||
+			    prot == PAGE_READWRITE || prot == PAGE_WRITECOPY ||
+			    prot == PAGE_READONLY) {
+				uint8_t *ramPtrBaseCandidate =
+					(uint8_t *)m.BaseAddress + offset;
+				if (probeRAMAddress(ramPtrBaseCandidate)) {
 					ramPtrBase = ramPtrBaseCandidate;
 					break;
 				}
 			}
 
-			// scan only large regions - we want to find g_rdram
-			/*
-			ulong regionSize = (ulong)m.RegionSize;
-			if (parallelStart <= address &&
-			    address <= parallelEnd && regionSize >= 0x800000) {
-				// g_rdram is aligned to 0x1000
-				ulong maxCnt = (ulong)m.RegionSize / 0x1000;
-				for (ulong num = 0; num < maxCnt; num++) {
-					readSuccess = process.ReadValue(
-						new IntPtr(
-							(long)(address +
-							       num * 0x1000)),
-						out value);
-					if (readSuccess) {
-						if (!isRamFound &&
-						    ((value & ramMagicMask) ==
-						     ramMagic)) {
-							ramPtrBase =
-								address +
-								num * 0x1000;
-							isRamFound = true;
-						}
-					}
+			address = (uint8_t *)m.BaseAddress + m.RegionSize;
+		} while (address <= MaxAddress);
+	} else {
+		HMODULE modules[1024];
+		DWORD bytesNeeded;
 
-					if (isRamFound)
-						break;
+		if (!EnumProcessModules(process_, modules, sizeof(modules),
+					&bytesNeeded))
+			return;
+
+		int moduleCount = bytesNeeded / sizeof(HMODULE);
+		for (int i = 0; i < moduleCount; ++i) {
+			HMODULE module = modules[i];
+			std::string name =
+				moduleNameLowerCase(process_, module);
+			if (name.find("parallel_n64") == std::string::npos)
+				continue;
+
+			MODULEINFO mi;
+			if (0 == GetModuleInformation(process_, module, &mi,
+						      sizeof(mi)))
+				continue;
+
+			uint8_t *candidateRamPtrBase =
+				(uint8_t *)mi.lpBaseOfDll;
+			uint8_t *parallelEnd =
+				candidateRamPtrBase + mi.SizeOfImage;
+			while (candidateRamPtrBase < parallelEnd) {
+				if (probeRAMAddress(candidateRamPtrBase)) {
+					ramPtrBase = candidateRamPtrBase;
+					break;
 				}
-			}*/
-		}
+				candidateRamPtrBase += 0x1000;
+			}
 
-		address = (uint8_t *)m.BaseAddress + m.RegionSize;
-	} while (address <= MaxAddress);
+			if (ramPtrBase)
+				break;
+		}
+	}
 
 	if (!ramPtrBase)
 		return;
