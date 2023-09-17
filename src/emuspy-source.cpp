@@ -162,8 +162,10 @@ try {
 		}
 
 		if (auto skin = std::atomic_load(&skin_)) {
-			Input input;
-			*(int32_t *)&input = emulator_->getInputs();
+			Input input{};
+			if (auto emulator = std::atomic_load(&emulator_))
+				*(int32_t *)&input = emulator->getInputs();
+
 			skin->render(input);
 		}
 	}
@@ -205,12 +207,24 @@ try {
 
 void EmuSpy::activate()
 try {
-	emulator_ = std::make_shared<Emulator>();
+	std::lock_guard<std::mutex> lck(startStopMutex_);
+	std::shared_ptr<Emulator> expected;
+	std::atomic_compare_exchange_strong(&emulator_, &expected,
+					    std::make_shared<Emulator>());
+
+	if (expected) {
+		gTeardownQueue->async([emu{std::move(expected)}]() {});
+	}
 } catch (...) {
 }
 
 void EmuSpy::deactivate()
 try {
-	gTeardownQueue->async([emu{std::move(emulator_)}]() {});
+	std::lock_guard<std::mutex> lck(startStopMutex_);
+	std::shared_ptr<Emulator> deletedInstance;
+	std::atomic_exchange(&emulator_, deletedInstance);
+	if (deletedInstance) {
+		gTeardownQueue->async([emu{std::move(deletedInstance)}]() {});
+	}
 } catch (...) {
 }

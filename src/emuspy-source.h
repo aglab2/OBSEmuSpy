@@ -33,6 +33,7 @@ private:
 	bool bgSelected(obs_properties_t *props, obs_property_t *p,
 			obs_data_t *settings);
 
+	std::mutex startStopMutex_;
 	std::shared_ptr<Emulator> emulator_;
 	std::shared_ptr<Image> bg_;
 	std::shared_ptr<Skin> skin_;
