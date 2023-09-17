@@ -48,6 +48,9 @@ void Interpreter::Div(const Instruction &inst)
 	if (inst.rs && inst.rt) {
 		int32_t rs = gpr[static_cast<int>(*inst.rs)];
 		int32_t rt = gpr[static_cast<int>(*inst.rt)];
+		if (0 == rt)
+			throw std::logic_error("Bad div");
+
 		lo = rs % rt;
 		hi = rs / rt;
 	}
@@ -60,6 +63,9 @@ void Interpreter::DivU(const Instruction &inst)
 			static_cast<uint32_t>(gpr[static_cast<int>(*inst.rs)]);
 		uint32_t rtv =
 			static_cast<uint32_t>(gpr[static_cast<int>(*inst.rt)]);
+		if (0 == rtv)
+			throw std::logic_error("Bad div");
+
 		lo = rsv % rtv;
 		hi = rsv / rtv;
 	}
