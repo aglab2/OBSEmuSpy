@@ -123,12 +123,10 @@ bool EmuSpy::bgSelected(obs_properties_t *props, obs_property_t *p,
 			obs_data_t *settings)
 
 try {
-	try {
-		if (const char *path = obs_data_get_string(settings, "bg"))
-			std::atomic_store(&bg_, std::make_shared<Image>(path));
-	} catch (...) {
-	}
-	return true;
+	if (const char *path = obs_data_get_string(settings, "bg"))
+		std::atomic_store(&bg_, std::make_shared<Image>(path));
+
+	return false;
 } catch (...) {
 	return false;
 }
@@ -150,11 +148,19 @@ obs_properties_t *EmuSpy::getProperties()
 	return props;
 }
 
+struct BlendGuard {
+	BlendGuard()
+	{
+		gs_blend_state_push();
+		gs_reset_blend_state();
+	}
+	~BlendGuard() { gs_blend_state_pop(); }
+};
+
 void EmuSpy::videoRender(gs_effect_t *effect)
 try {
 	auto effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
-	gs_blend_state_push();
-	gs_reset_blend_state();
+	BlendGuard blendGuard;
 	while (gs_effect_loop(effect, "Draw")) {
 		if (auto bg = std::atomic_load(&bg_)) {
 			obs_source_draw(bg->texture(), 0, 0, bg->cx(), bg->cy(),
@@ -169,8 +175,6 @@ try {
 			skin->render(input);
 		}
 	}
-
-	gs_blend_state_pop();
 } catch (...) {
 }
 
