@@ -3,13 +3,14 @@
 
 #include "tinyxml2.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <stdexcept>
 
 template<typename T>
 T static load(tinyxml2::XMLElement &elem, const char *name);
 
-template<> static const char *load(tinyxml2::XMLElement &elem, const char *name)
+template<> const char *load(tinyxml2::XMLElement &elem, const char *name)
 {
 	auto attr = elem.FindAttribute(name);
 	if (!attr)
@@ -19,7 +20,7 @@ template<> static const char *load(tinyxml2::XMLElement &elem, const char *name)
 }
 
 template<>
-static std::optional<std::string> load(tinyxml2::XMLElement &elem,
+std::optional<std::string> load(tinyxml2::XMLElement &elem,
 				       const char *name)
 {
 	if (auto val = load<const char *>(elem, name)) {
@@ -29,7 +30,7 @@ static std::optional<std::string> load(tinyxml2::XMLElement &elem,
 	}
 }
 
-template<> static std::string load(tinyxml2::XMLElement &elem, const char *name)
+template<> std::string load(tinyxml2::XMLElement &elem, const char *name)
 {
 	if (auto val = load<const char *>(elem, name)) {
 		return std::string{val};
@@ -38,7 +39,7 @@ template<> static std::string load(tinyxml2::XMLElement &elem, const char *name)
 	}
 }
 
-template<> static int load(tinyxml2::XMLElement &elem, const char *name)
+template<> int load(tinyxml2::XMLElement &elem, const char *name)
 {
 	if (auto val = load<const char *>(elem, name)) {
 		return std::atoi(val);
@@ -53,7 +54,7 @@ std::vector<SkinBackgroundDesc> loadBackgrounds(const char *_path)
 	auto skinPath = path / "skin.xml";
 
 	tinyxml2::XMLDocument doc;
-	doc.LoadFile(skinPath.u8string().c_str());
+	doc.LoadFile(skinPath.string().c_str());
 
 	if (doc.Error())
 		throw std::logic_error(doc.ErrorStr());
@@ -102,6 +103,10 @@ Skin::Button::Name Skin::Button::toName(std::string str)
 		return Name::CLeft;
 	if (str == "cright")
 		return Name::CRight;
+	if (str == "gcx")
+		return Name::X;
+	if (str == "gcy")
+		return Name::Y;
 	if (str == "up")
 		return Name::Up;
 	if (str == "down")
@@ -143,7 +148,7 @@ Skin::Skin(const char *_path)
 	auto skinPath = path / "skin.xml";
 
 	tinyxml2::XMLDocument doc;
-	doc.LoadFile(skinPath.u8string().c_str());
+	doc.LoadFile(skinPath.string().c_str());
 
 	if (doc.Error())
 		throw std::logic_error(doc.ErrorStr());
@@ -216,8 +221,8 @@ void Skin::render(Input input)
 			127.f;
 		auto &image = stick.image;
 		obs_source_draw(image.texture(),
-				stick.pos.x + (int)(stick.range.x * offX),
-				stick.pos.y - (int)(stick.range.y * offY),
+				stick.pos.x + (int)((float) stick.range.x * offX),
+				stick.pos.y - (int)((float) stick.range.y * offY),
 				stick.size.x ? stick.size.x : image.cx(),
 				stick.size.y ? stick.size.y : image.cy(),
 				false);

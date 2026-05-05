@@ -34,7 +34,7 @@ public:
 
 	Image(Image &&o) : me_(std::move(o.me_)) {}
 
-	Image &operator=(Image &&o) { me_ = std::move(o.me_); }
+	Image &operator=(Image &&o) { me_ = std::move(o.me_); return *this; }
 
 	gs_texture_t *texture() const { return me_->texture; }
 	uint32_t cx() const { return me_->cx; }

@@ -1,8 +1,11 @@
 #pragma once
 
 #include "mips_analyzer.h"
+#ifdef _WIN32
 #include "winpp.h"
+#endif
 
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -38,12 +41,15 @@ private:
 		UNKNOWN,
 		PJ64,
 		RETROARCH,
+		DOLPHIN,
 	};
 
-	uint32_t pid_; // diagnostics only...
+	uint32_t pid_ = 0;
+#if _WIN32
 	WinHandle process_;
+#endif
 	EmulatorType type_ = EmulatorType::UNKNOWN;
-	BOOL processIs64Bit_ = false;
+	bool processIs64Bit_ = false;
 	uint8_t *ramPtrBase_ = nullptr;
 	std::optional<MIPS::AnalyzeResult> analyzeResult_;
 	int msToWait_ = 1;

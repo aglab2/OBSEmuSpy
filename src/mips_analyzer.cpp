@@ -18,7 +18,7 @@ struct MaskPair {
 	uint32_t val;
 	uint32_t mask;
 
-	MaskPair(uint32_t val, uint32_t mask) : val(val), mask(mask) {}
+	MaskPair(uint32_t _val, uint32_t _mask) : val(_val), mask(_mask) {}
 
 	std::string toString() const
 	{

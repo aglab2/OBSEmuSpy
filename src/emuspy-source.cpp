@@ -13,10 +13,14 @@ static obs_properties_t *emuspy_source_getproperties(void *data)
 	return reinterpret_cast<EmuSpy *>(data)->getProperties();
 }
 
-static void emuspy_source_getdefaults(obs_data_t *settings) {}
+static void emuspy_source_getdefaults(obs_data_t *settings)
+{
+	(void)settings;
+}
 
 static void *emuspy_source_create(obs_data_t *settings, obs_source_t *source)
 {
+	(void)source;
 	return new EmuSpy(settings);
 }
 
@@ -99,6 +103,7 @@ bool EmuSpy::bgSelectedProxy(void *priv, obs_properties_t *props,
 bool EmuSpy::skinSelected(obs_properties_t *props, obs_property_t *p,
 			  obs_data_t *settings)
 try {
+	(void)p;
 	const char *path = obs_data_get_string(settings, "skin");
 	if (!path)
 		return false;
@@ -123,8 +128,9 @@ bool EmuSpy::bgSelected(obs_properties_t *props, obs_property_t *p,
 			obs_data_t *settings)
 
 try {
+	(void) props; (void) p;
 	if (const char *path = obs_data_get_string(settings, "bg"))
-		std::atomic_store(&bg_, std::make_shared<Image>(path));
+		bg_ = std::make_shared<Image>(path);
 
 	return false;
 } catch (...) {
@@ -157,19 +163,20 @@ struct BlendGuard {
 	~BlendGuard() { gs_blend_state_pop(); }
 };
 
-void EmuSpy::videoRender(gs_effect_t *effect)
+void EmuSpy::videoRender(gs_effect_t *_effect)
 try {
+	(void) _effect;
 	auto effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
 	BlendGuard blendGuard;
 	while (gs_effect_loop(effect, "Draw")) {
-		if (auto bg = std::atomic_load(&bg_)) {
+		if (auto bg = bg_.load()) {
 			obs_source_draw(bg->texture(), 0, 0, bg->cx(), bg->cy(),
 					false);
 		}
 
 		if (auto skin = std::atomic_load(&skin_)) {
 			Input input{};
-			if (auto emulator = std::atomic_load(&emulator_))
+			if (auto emulator = emulator_.load())
 				*(int32_t *)&input = emulator->getInputs();
 
 			skin->render(input);

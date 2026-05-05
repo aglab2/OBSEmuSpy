@@ -11,8 +11,8 @@
 #include <string>
 
 struct SkinBackgroundDesc {
-	SkinBackgroundDesc(std::string path, std::string name)
-		: path(std::move(path)), name(std::move(name))
+	SkinBackgroundDesc(std::string _path, std::string _name)
+		: path(std::move(_path)), name(std::move(_name))
 	{
 	}
 
@@ -54,9 +54,12 @@ public:
 		};
 		static Name toName(std::string str);
 
-		Button(Name name, const std::string &path, Coordinates pos,
-		       Coordinates size)
-			: name(name), image(path.c_str()), pos(pos), size(size)
+		Button(Name _name, const std::string &_path, Coordinates _pos,
+		       Coordinates _size)
+			: name(_name),
+			  image(_path.c_str()),
+			  pos(_pos),
+			  size(_size)
 		{
 		}
 
@@ -70,14 +73,14 @@ public:
 		enum class Name { X, Y };
 		static Name toName(std::string str);
 
-		Stick(Name nameX, Name nameY, const std::string &path,
-		      Coordinates pos, Coordinates size, Coordinates range)
-			: nameX(nameX),
-			  nameY(nameY),
-			  image(path.c_str()),
-			  pos(pos),
-			  size(size),
-			  range(range)
+		Stick(Name _nameX, Name _nameY, const std::string &_path,
+		      Coordinates _pos, Coordinates _size, Coordinates _range)
+			: nameX(_nameX),
+			  nameY(_nameY),
+			  image(_path.c_str()),
+			  pos(_pos),
+			  size(_size),
+			  range(_range)
 		{
 		}
 

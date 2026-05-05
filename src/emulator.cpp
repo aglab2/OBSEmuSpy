@@ -1,10 +1,29 @@
 #include "emulator.h"
 
+#include "plugin-support.h"
+
+#ifdef _WIN32
 #include <psapi.h>
+#else
+#include <dirent.h>
+#include <string.h>
+#include <sys/fcntl.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <unistd.h>
+
+#include "input.h"
+#endif
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
+#include <string>
 #include <vector>
+
+#ifndef _WIN32
+#define process_ pid_
+#endif
 
 Emulator::Emulator() : thread_(&Emulator::work, this) {}
 
@@ -18,6 +37,7 @@ Emulator::~Emulator()
 	thread_.join();
 }
 
+#if _WIN32
 static std::string moduleNameLowerCase(HANDLE process, HMODULE module)
 {
 	std::string name;
@@ -183,6 +203,189 @@ void Emulator::scanProcessRAM()
 
 	ramPtrBase_ = ramPtrBase;
 }
+#define translateInputs(x) x
+#else
+void Emulator::searchProcess()
+{
+	DIR *dir = opendir("/proc");
+	while (auto entry = readdir(dir)) {
+		const char *name = entry->d_name;
+		if (name[0] == '.')
+			continue;
+
+		pid_t pid = atoi(name);
+		if (!pid)
+			continue;
+
+		char commPath[100];
+		sprintf(commPath, "/proc/%d/comm", pid);
+		char comm[32];
+
+		int fd = open(commPath, O_RDONLY);
+		if (fd < 0)
+			continue;
+
+		ssize_t sz = read(fd, comm, sizeof(comm));
+		close(fd);
+
+		if (sz <= 1)
+			continue;
+
+		std::string_view commSV{comm, (size_t)sz - 1};
+		static std::string_view searchCommSV = "dolphin-emu";
+		if (commSV != searchCommSV)
+			continue;
+
+		type_ = EmulatorType::DOLPHIN;
+		pid_ = pid;
+		processIs64Bit_ = true;
+		break;
+	}
+	closedir(dir);
+}
+
+void Emulator::scanProcessRAM()
+{
+	char mapPath[100];
+	sprintf(mapPath, "/proc/%d/maps", process_);
+
+	std::ifstream file(mapPath);
+	if (!file.is_open()) {
+		markProcessDead();
+		return;
+	}
+
+	std::string line;
+	std::string needle = "/bin/dolphin-emu";
+	while (std::getline(file, line)) {
+		// 55a832538000-55a83256b000 rw-p 01820000 103:04 7087472                   /app/bin/dolphin-emu
+		if (line.find(needle) == std::string::npos)
+			continue;
+
+		auto dash = line.find('-');
+		if (dash == std::string::npos)
+			continue;
+		auto space = line.find(' ');
+		if (space == std::string::npos)
+			continue;
+
+		std::string_view lineSV{line};
+		std::string_view perms = lineSV.substr(space + 1, 4); // rw-p
+		if (perms.length() != 4)
+			continue;
+
+		if ('w' != perms[1])
+			continue;
+
+		std::string startStr = line.substr(0, dash); // 55a832538000
+		uint64_t start = strtoul(startStr.c_str(), nullptr, 16);
+
+		ramPtrBase_ = (uint8_t *)start;
+		analyzeResult_ = MIPS::AnalyzeResult{
+			.interpretedInstructionsOffset = 0x16ed8 / 4,
+			.interpretedInstructions = {0x76726553,
+						    0x00007265}, // Server\0\0
+			.gControllerPads = 0x16e0c,
+		};
+
+		break;
+	}
+}
+
+#define WAIT_OBJECT_0 0
+#define WaitForSingleObject(...) 1
+static bool ReadProcessMemory(pid_t pid, void *remotePtr, void *localPtr,
+			      size_t sz, void *_)
+{
+	(void)_;
+	struct iovec lvec[] = {{
+		.iov_base = localPtr,
+		.iov_len = sz,
+	}};
+	struct iovec rvec[] = {{
+		.iov_base = remotePtr,
+		.iov_len = sz,
+	}};
+
+	return (ssize_t)sz == process_vm_readv(pid, lvec, 1, rvec, 1, 0);
+}
+
+enum N64Name {
+	N64_CRight,
+	N64_CLeft,
+	N64_CDown,
+	N64_CUp,
+	N64_R,
+	N64_L,
+	N64_X,
+	N64_Y,
+
+	N64_Right,
+	N64_Left,
+	N64_Down,
+	N64_Up,
+	N64_Start,
+	N64_Z,
+	N64_B,
+	N64_A,
+};
+
+enum DolphinName {
+	GC_A, // N64_CRight
+	GC_B, // N64_CLeft
+	GC_X, // N64_CDown
+	GC_Y, // N64_CUp
+	GC_Start, // N64_R
+	GC_CLeft, // N64_L
+	GC_CDown, // N64_X
+	GC_CUp, // N64_Y
+
+	GC_Right, // N64_Right
+	GC_Left, // N64_Left
+	GC_Down, // N64_Down
+	GC_Up, // N64_Up
+	GC_Z, // N64_Start
+	GC_R, // N64_Z
+	GC_L, // N64_B
+	GC_CRight, // N64_A
+};
+
+static uint32_t translateInput(uint32_t value)
+{
+	value = __builtin_bswap32(value);
+	struct Input input;
+	__builtin_memcpy(&input, &value, sizeof(input));
+
+	input.x -= 0x80;
+	input.y -= 0x80;
+
+	uint16_t dolphinFlags = 0;
+#define TRANSLATE(flag) if (input.flags & (1 << GC_##flag)) { dolphinFlags |= (1 << N64_##flag); }
+	TRANSLATE(CRight)
+	TRANSLATE(CLeft)
+	TRANSLATE(CDown)
+	TRANSLATE(CUp)
+	TRANSLATE(R)
+	TRANSLATE(L)
+	TRANSLATE(X)
+	TRANSLATE(Y)
+
+	TRANSLATE(Right)
+	TRANSLATE(Left)
+	TRANSLATE(Down)
+	TRANSLATE(Up)
+	TRANSLATE(Start)
+	TRANSLATE(Z)
+	TRANSLATE(B)
+	TRANSLATE(A)
+#undef TRANSLATE
+	input.flags = dolphinFlags;
+
+	__builtin_memcpy(&value, &input, sizeof(input));
+
+	return value;
+}
+#endif
 
 int32_t Emulator::feedInputs()
 {
@@ -223,7 +426,7 @@ int32_t Emulator::feedInputs()
 		return 0;
 	}
 
-	return inputs;
+	return translateInput(inputs);
 }
 
 void Emulator::work()

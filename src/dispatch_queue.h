@@ -1,185 +1,113 @@
 #pragma once
 
 // This is an elaborate implementation of macOS dispatch queue
+// It always persists the 'thread' that is executing
+// That means that 'sync' is always executing on either created thread or in current thread
+// Similarly to macOS impl 'async' always ex
 
+#include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <thread>
 #include <functional>
-#include <variant>
-#include <optional>
-
-#include <windows.h>
-
-class SynchImports {
-public:
-	using WOA_ADDR = BOOL(WINAPI *)(volatile VOID *, PVOID, SIZE_T, DWORD);
-	using WBAS_ADDR = void(WINAPI *)(PVOID);
-
-	SynchImports()
-	{
-		hmodSynch_ = LoadLibraryA("API-MS-Win-Core-Synch-l1-2-0.dll");
-		waitOnAddress_ =
-			(WOA_ADDR)GetProcAddress(hmodSynch_, "WaitOnAddress");
-		wakeByAddressSingle_ = (WBAS_ADDR)GetProcAddress(
-			hmodSynch_, "WakeByAddressSingle");
-	}
-	~SynchImports()
-	{
-		if (hmodSynch_)
-			FreeLibrary(hmodSynch_);
-	}
-
-	WOA_ADDR waitOnAddress() const { return waitOnAddress_; }
-	WBAS_ADDR wakeByAddressSingle() const { return wakeByAddressSingle_; }
-
-private:
-	HMODULE hmodSynch_;
-	WOA_ADDR waitOnAddress_;
-	WBAS_ADDR wakeByAddressSingle_;
-};
+#include <memory>
+#include <mutex>
 
 class QueueExecutor {
 public:
-	class LegacyEvent {
-	public:
-		LegacyEvent() = default;
-
-		void notify(uint32_t &notified)
-		{
-			{
-				std::lock_guard<std::mutex> lck(mutex_);
-				notified = true;
-			}
-			cv_.notify_one();
-		}
-		void wait(uint32_t &notified)
-		{
-			std::unique_lock<std::mutex> lck(mutex_);
-			while (!notified) {
-				cv_.wait(lck, [&]() { return notified; });
-			}
-		}
-
-	private:
-		std::condition_variable cv_;
-		std::mutex mutex_;
-	};
-
-	class Event {
-	public:
-		explicit Event(SynchImports &synch)
-			: waitOnAddress_(synch.waitOnAddress()),
-			  wakeByAddressSingle_(synch.wakeByAddressSingle())
-		{
-			if (!waitOnAddress_ || !wakeByAddressSingle_) {
-				legacyEvent_.emplace();
-			}
-		}
-
-		Event &operator=(const Event &) = delete;
-		Event(const Event &) = delete;
-
-		void notify()
-		{
-			if (notified_)
-				return;
-
-			if (!legacyEvent_) {
-				notified_ = true;
-				wakeByAddressSingle_(&notified_);
-			} else {
-				legacyEvent_->notify(notified_);
-			}
-		}
-		void wait()
-		{
-			if (!legacyEvent_) {
-				uint32_t undesired = 0;
-				uint32_t captured = notified_;
-				while (captured == undesired) {
-					waitOnAddress_(&notified_, &undesired,
-						       sizeof(notified_),
-						       INFINITE);
-					captured = notified_;
-				}
-			} else {
-				legacyEvent_->wait(notified_);
-			}
-		}
-
-	private:
-		uint32_t notified_ = false;
-		std::optional<LegacyEvent> legacyEvent_;
-		SynchImports::WOA_ADDR waitOnAddress_;
-		SynchImports::WBAS_ADDR wakeByAddressSingle_;
-	};
-
-	using Fn = std::function<void()>;
-
-	QueueExecutor();
+	using Task = std::function<void()>;
+	using TaskStart = std::function<bool()>;
+	QueueExecutor() = default;
 	~QueueExecutor();
 
-	void sync(Fn);
-	void async(Fn);
-	void asyncOnce(Fn);
+	void start(TaskStart fn);
+	template<typename Fn> bool sync(Fn fn)
+	{
+		bool notify;
+		bool executeNow = false;
+		std::atomic_flag finished = ATOMIC_FLAG_INIT;
 
-	void start();
-	void stop();
+		{
+			std::lock_guard lck(mutex_);
+			if (!canSubmit_)
+				return false;
 
-	// returns true if 'fn' will be called as a dtor
-	bool disableTasksAndAsync(Fn);
+			if (allowSameThreadExec_ && !hasPendingTasks()) {
+				executeNow = true;
+				busy_ = true;
+			} else {
+				// either busy or tasks are present, defer to thread
+				executeNow = false;
+				notify = !hasPendingTasks();
+				tasks_.emplace_back(
+					[&finished, afn{std::move(fn)}]() {
+						afn();
+						finished.test_and_set();
+						finished.notify_one();
+					});
+			}
+		}
+
+		if (executeNow) {
+			// we are executing the task on the same thread
+			fn();
+			{
+				// we are done executing stolen task, unbusy and maybe wakeup the thread
+				std::lock_guard lck(mutex_);
+				if (!canSubmit_)
+					return false;
+
+				busy_ = false;
+				notify = !tasks_.empty();
+			}
+
+			if (notify) {
+				cv_.notify_one();
+			}
+		} else {
+			// just notify the thread and wait for execution to be done similarly to 'async'
+			if (notify) {
+				cv_.notify_one();
+			}
+
+			finished.wait(false);
+		}
+
+		return true;
+	}
+
+	bool async(Task);
+	void stop(Task = {});
+
+	bool stopAsync(Task = {});
+	void stopWait();
 
 private:
-	class SyncTask {
-	public:
-		explicit SyncTask(SynchImports &imports, Fn fn)
-			: event_(imports), task_(fn)
-		{
-		}
+	// currently there is a task that is being executed, either in sync thread or in executor thread
+	bool hasPendingTasks() const { return busy_ || !tasks_.empty(); }
 
-		void run()
-		{
-			task_();
-			event_.notify();
-		}
+	// called by executor to check if there is anything it needs to execute
+	bool hasPendingTasksForExecutor() const
+	{
+		return !busy_ && !tasks_.empty();
+	}
 
-		Event &event() { return event_; }
-
-	private:
-		Event event_;
-		Fn task_;
-	};
-
-	class AsyncTask {
-	public:
-		AsyncTask(Fn fn) : task_(fn) {}
-
-		void run() { task_(); }
-
-	private:
-		Fn task_;
-	};
-
-	using SyncTaskPtr = SyncTask *;
-	using AsyncTaskPtr = std::unique_ptr<AsyncTask>;
-	using Task = std::variant<SyncTaskPtr, AsyncTaskPtr>;
-
-	SynchImports synch_;
+	// OpenGL will be unhappy if different thread will attempt to execute the code related to it
+	// This flag will force execution on 'executor' even if current thread can be used instead
+	bool allowSameThreadExec_ = false;
 
 	// Lots of shimes needed for the tasks queue, built around condvar + deque
 	std::condition_variable cv_;
 	std::mutex mutex_;
 	std::deque<Task> tasks_;
 	bool running_ = false;
-	std::atomic_bool acceptsTasks_ = false;
+	bool busy_ = false;
+	bool canSubmit_ = false;
 
 	// The Executor as it goes
 	std::thread executor_;
 
 	void loop();
-
-	void syncInternal(Fn fn);
-	void asyncInternal(Fn fn);
 };
 
 extern QueueExecutor *gTeardownQueue;

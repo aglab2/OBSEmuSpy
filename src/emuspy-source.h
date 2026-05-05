@@ -34,7 +34,7 @@ private:
 			obs_data_t *settings);
 
 	std::mutex startStopMutex_;
-	std::shared_ptr<Emulator> emulator_;
-	std::shared_ptr<Image> bg_;
-	std::shared_ptr<Skin> skin_;
+	std::atomic<std::shared_ptr<Emulator>> emulator_;
+	std::atomic<std::shared_ptr<Image>> bg_;
+	std::atomic<std::shared_ptr<Skin>> skin_;
 };

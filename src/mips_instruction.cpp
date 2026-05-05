@@ -16,7 +16,7 @@ std::string Instruction::toString()
 {
 	std::string output = "";
 
-	output += static_cast<int>(cmd); // Convert enum to int
+	output += static_cast<char>(cmd); // Convert enum to int
 
 	if (rs.has_value() && rt.has_value() && off.has_value()) {
 		if (cmd != CMD_BEQ && cmd != CMD_BEQL && cmd != CMD_BNE &&
