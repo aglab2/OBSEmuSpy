@@ -340,8 +340,8 @@ enum DolphinName {
 	GC_CDown, // N64_X
 	GC_CUp, // N64_Y
 
-	GC_Right, // N64_Right
-	GC_Left, // N64_Left
+	GC_Left, // N64_Right
+	GC_Right, // N64_Left
 	GC_Down, // N64_Down
 	GC_Up, // N64_Up
 	GC_Z, // N64_Start
