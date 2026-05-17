@@ -63,10 +63,18 @@ void Emulator::searchProcess()
 		std::string name = moduleNameLowerCase(process, mainModule);
 		bool pj64 = name == "project64.exe";
 		bool retroarch = name == "retroarch.exe";
-		if (!pj64 && !retroarch)
+		bool mupen = name == "mupen64.exe";
+		if (!pj64 && !retroarch && !mupen)
 			continue;
 
-		type_ = pj64 ? EmulatorType::PJ64 : EmulatorType::RETROARCH;
+		type_ = EmulatorType::UNKNOWN;
+		if (pj64)
+			type_ = EmulatorType::PJ64;
+		else if (retroarch)
+			type_ = EmulatorType::RETROARCH;
+		else if (mupen)
+			type_ = EmulatorType::MUPEN;
+
 		pid_ = pid;
 		process_ = std::move(process);
 		IsWow64Process(process_, &processIs64Bit_);
@@ -102,11 +110,11 @@ void Emulator::scanProcessRAM()
 	PVOID MaxAddress = processIs64Bit_ ? (PVOID)0x800000000000ULL
 					   : (PVOID)0xffffffffULL;
 	PVOID address = nullptr;
-	const int offset = 0; // TODO: Change for mupen
 	uint8_t *ramPtrBase = nullptr;
 
 	if (type_ == EmulatorType::PJ64) {
 		do {
+			int offset = type_ == EmulatorType::MUPEN ? 0x20 : 0;
 			MEMORY_BASIC_INFORMATION m;
 			SIZE_T mbiSize = sizeof(m);
 			SIZE_T result =
@@ -130,6 +138,10 @@ void Emulator::scanProcessRAM()
 
 			address = (uint8_t *)m.BaseAddress + m.RegionSize;
 		} while (address <= MaxAddress);
+	} else if (type_ == EmulatorType::MUPEN) {
+		ramPtrBase = (uint8_t *)0x00505CB0;
+		if (!probeRAMAddress(ramPtrBase))
+			ramPtrBase = nullptr;
 	} else {
 		HMODULE modules[1024];
 		DWORD bytesNeeded;

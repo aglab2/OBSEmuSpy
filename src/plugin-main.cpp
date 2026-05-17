@@ -34,7 +34,8 @@ bool obs_module_load(void)
 	gTeardownQueue->start();
 
 	obs_source_info emuSpySource = EmuSpy::makeOBSSourceInfo();
-	obs_register_source(&emuSpySource);
+	obs_register_source_s(&emuSpySource, 392);
+	// obs_register_source(&emuSpySource);
 	return true;
 }
 

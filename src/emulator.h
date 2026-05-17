@@ -38,6 +38,7 @@ private:
 		UNKNOWN,
 		PJ64,
 		RETROARCH,
+		MUPEN,
 	};
 
 	uint32_t pid_; // diagnostics only...
