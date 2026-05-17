@@ -82,11 +82,11 @@ void Emulator::searchProcess()
 	}
 }
 
+const uint32_t ramMagic = 0x3C1A8000;
+const uint32_t ramMagicMask = 0xfffff000;
+
 bool Emulator::probeRAMAddress(void *ramPtrBaseCandidate)
 {
-	const uint32_t ramMagic = 0x3C1A8000;
-	const uint32_t ramMagicMask = 0xfffff000;
-
 	uint32_t value;
 	if (!ReadProcessMemory(process_, ramPtrBaseCandidate, &value,
 			       sizeof(value), nullptr))
@@ -97,6 +97,35 @@ bool Emulator::probeRAMAddress(void *ramPtrBaseCandidate)
 	}
 
 	return false;
+}
+
+uint64_t Emulator::scanForRAM(void *address, uint64_t size, uint64_t delim)
+{
+	bool isRamFound = false;
+	uint64_t ramPtrBase = 0;
+	uint64_t addressAlignedStart =
+		((uint64_t)address + delim - 1) / delim * delim;
+	uint64_t addressAlignedEnd = ((uint64_t)address + size) / delim * delim;
+
+	for (uint64_t probe = addressAlignedStart; probe <= addressAlignedEnd;
+	     probe += delim) {
+		uint32_t value;
+		bool readSuccess = ReadProcessMemory(process_, (void *)probe,
+						     &value, sizeof(value),
+						     nullptr);
+		if (readSuccess) {
+			if (!isRamFound &&
+			    ((value & ramMagicMask) == ramMagic)) {
+				ramPtrBase = probe;
+				isRamFound = true;
+			}
+		}
+
+		if (isRamFound)
+			break;
+	}
+
+	return ramPtrBase;
 }
 
 void Emulator::scanProcessRAM()
@@ -112,37 +141,15 @@ void Emulator::scanProcessRAM()
 	PVOID address = nullptr;
 	uint8_t *ramPtrBase = nullptr;
 
-	if (type_ == EmulatorType::PJ64) {
-		do {
-			int offset = type_ == EmulatorType::MUPEN ? 0x20 : 0;
-			MEMORY_BASIC_INFORMATION m;
-			SIZE_T mbiSize = sizeof(m);
-			SIZE_T result =
-				VirtualQueryEx(process_, address, &m, mbiSize);
-			if (address == (char *)m.BaseAddress + m.RegionSize ||
-			    result == 0)
-				break;
-
-			DWORD prot = m.Protect & 0xff;
-			if (prot == PAGE_EXECUTE_READWRITE ||
-			    prot == PAGE_EXECUTE_WRITECOPY ||
-			    prot == PAGE_READWRITE || prot == PAGE_WRITECOPY ||
-			    prot == PAGE_READONLY) {
-				uint8_t *ramPtrBaseCandidate =
-					(uint8_t *)m.BaseAddress + offset;
-				if (probeRAMAddress(ramPtrBaseCandidate)) {
-					ramPtrBase = ramPtrBaseCandidate;
-					break;
-				}
-			}
-
-			address = (uint8_t *)m.BaseAddress + m.RegionSize;
-		} while (address <= MaxAddress);
-	} else if (type_ == EmulatorType::MUPEN) {
+	if (type_ == EmulatorType::MUPEN) {
 		ramPtrBase = (uint8_t *)0x00505CB0;
 		if (!probeRAMAddress(ramPtrBase))
 			ramPtrBase = nullptr;
-	} else {
+	}
+
+	uint64_t parallelStart = 0;
+	uint64_t parallelEnd = 0;
+	if (type_ == EmulatorType::RETROARCH) {
 		HMODULE modules[1024];
 		DWORD bytesNeeded;
 
@@ -163,22 +170,53 @@ void Emulator::scanProcessRAM()
 						      sizeof(mi)))
 				continue;
 
-			uint8_t *candidateRamPtrBase =
-				(uint8_t *)mi.lpBaseOfDll;
-			uint8_t *parallelEnd =
-				candidateRamPtrBase + mi.SizeOfImage;
-			while (candidateRamPtrBase < parallelEnd) {
-				if (probeRAMAddress(candidateRamPtrBase)) {
-					ramPtrBase = candidateRamPtrBase;
-					break;
-				}
-				candidateRamPtrBase += 0x1000;
-			}
-
-			if (ramPtrBase)
-				break;
+			parallelStart = (uint64_t)mi.lpBaseOfDll;
+			parallelEnd = parallelStart + mi.SizeOfImage;
 		}
 	}
+
+	do {
+		int offset = type_ == EmulatorType::MUPEN ? 0x20 : 0;
+		MEMORY_BASIC_INFORMATION m;
+		SIZE_T mbiSize = sizeof(m);
+		SIZE_T result = VirtualQueryEx(process_, address, &m, mbiSize);
+		if (address == (char *)m.BaseAddress + m.RegionSize ||
+		    result == 0)
+			break;
+
+		DWORD prot = m.Protect & 0xff;
+		if (prot == PAGE_EXECUTE_READWRITE ||
+		    prot == PAGE_EXECUTE_WRITECOPY || prot == PAGE_READWRITE ||
+		    prot == PAGE_WRITECOPY || prot == PAGE_READONLY) {
+			uint8_t *ramPtrBaseCandidate =
+				(uint8_t *)m.BaseAddress + offset;
+			if (probeRAMAddress(ramPtrBaseCandidate)) {
+				ramPtrBase = ramPtrBaseCandidate;
+				break;
+			}
+
+			// Parallel: scan only large regions - we want to find g_rdram
+			uint64_t regionSize = (uint64_t)m.RegionSize;
+			uint64_t _address = (uint64_t)address;
+			if (parallelStart <= _address &&
+				_address <= parallelEnd && regionSize >= 0x800000) {
+				ramPtrBase = (uint8_t *)scanForRAM(
+					address, m.RegionSize, 0x1000);
+			}
+
+			if (parallelStart != 0 && regionSize >= 0x800000) {
+				ramPtrBase = (uint8_t *)scanForRAM(
+					address, m.RegionSize, 0x10000);
+			}
+
+			// Modern mupen allocates a gigantic array with very strict alignment
+			if (regionSize >= 0x100000000) {
+				ramPtrBase = (uint8_t *)scanForRAM(
+					address, 0x20000, 0x1000);
+			}
+		}
+		address = (uint8_t *)m.BaseAddress + m.RegionSize;
+	} while (!ramPtrBase && address <= MaxAddress);
 
 	if (!ramPtrBase)
 		return;
