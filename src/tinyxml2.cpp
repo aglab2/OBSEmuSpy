@@ -21,17 +21,36 @@ must not be misrepresented as being the original software.
 distribution.
 */
 
-#pragma comment(lib, "legacy_stdio_definitions.lib")
-
 #include "tinyxml2.h"
 
 #include <new> // yes, this one new style header, is in the Android SDK.
-#if defined(ANDROID_NDK) || defined(__BORLANDC__) || defined(__QNXNTO__)
+#if defined(ANDROID_NDK) || defined(__BORLANDC__) || defined(__QNXNTO__) || \
+	defined(__CC_ARM)
 #include <stddef.h>
 #include <stdarg.h>
 #else
 #include <cstddef>
 #include <cstdarg>
+#endif
+
+// Handle fallthrough attribute for different compilers
+#ifndef __has_attribute
+#define __has_attribute(x) 0
+#endif
+#ifndef __has_cpp_attribute
+#define __has_cpp_attribute(x) 0
+#endif
+
+#if defined(_MSC_VER)
+#define TIXML_FALLTHROUGH (void(0))
+#elif (__cplusplus >= 201703L && __has_cpp_attribute(fallthrough))
+#define TIXML_FALLTHROUGH [[fallthrough]]
+#elif __has_cpp_attribute(clang::fallthrough)
+#define TIXML_FALLTHROUGH [[clang::fallthrough]]
+#elif __has_attribute(fallthrough)
+#define TIXML_FALLTHROUGH __attribute__((fallthrough))
+#else
+#define TIXML_FALLTHROUGH (void(0))
 #endif
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1400) && (!defined WINCE)
@@ -98,6 +117,9 @@ static inline int TIXML_VSCPRINTF(const char *format, va_list va)
 #define TIXML_VSNPRINTF vsnprintf
 static inline int TIXML_VSCPRINTF(const char *format, va_list va)
 {
+	if (!format) {
+		return 0;
+	}
 	int len = vsnprintf(0, 0, format, va);
 	TIXMLASSERT(len >= 0);
 	return len;
@@ -108,10 +130,11 @@ static inline int TIXML_VSCPRINTF(const char *format, va_list va)
 #if defined(_WIN64)
 #define TIXML_FSEEK _fseeki64
 #define TIXML_FTELL _ftelli64
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__ANDROID__)
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
+	defined(__NetBSD__) || defined(__DragonFly__) || defined(__CYGWIN__)
 #define TIXML_FSEEK fseeko
 #define TIXML_FTELL ftello
-#elif defined(__unix__) && defined(__x86_64__)
+#elif defined(__ANDROID__) && __ANDROID_API__ > 24
 #define TIXML_FSEEK fseeko64
 #define TIXML_FTELL ftello64
 #else
@@ -232,13 +255,13 @@ char *StrPair::ParseName(char *p)
 	if (!p || !(*p)) {
 		return 0;
 	}
-	if (!XMLUtil::IsNameStartChar((unsigned char)*p)) {
+	if (!XMLUtil::IsNameStartChar(static_cast<unsigned char>(*p))) {
 		return 0;
 	}
 
 	char *const start = p;
 	++p;
-	while (*p && XMLUtil::IsNameChar((unsigned char)*p)) {
+	while (*p && XMLUtil::IsNameChar(static_cast<unsigned char>(*p))) {
 		++p;
 	}
 
@@ -446,17 +469,17 @@ void XMLUtil::ConvertUTF32ToUTF8(unsigned long input, char *output, int *length)
 		--output;
 		*output = static_cast<char>((input | BYTE_MARK) & BYTE_MASK);
 		input >>= 6;
-		//fall through
+		TIXML_FALLTHROUGH;
 	case 3:
 		--output;
 		*output = static_cast<char>((input | BYTE_MARK) & BYTE_MASK);
 		input >>= 6;
-		//fall through
+		TIXML_FALLTHROUGH;
 	case 2:
 		--output;
 		*output = static_cast<char>((input | BYTE_MARK) & BYTE_MASK);
 		input >>= 6;
-		//fall through
+		TIXML_FALLTHROUGH;
 	case 1:
 		--output;
 		*output = static_cast<char>(input | FIRST_BYTE_MARK[*length]);
@@ -468,93 +491,83 @@ void XMLUtil::ConvertUTF32ToUTF8(unsigned long input, char *output, int *length)
 
 const char *XMLUtil::GetCharacterRef(const char *p, char *value, int *length)
 {
-	// Presume an entity, and pull it out.
+	// Assume an entity, and pull it out.
 	*length = 0;
 
+	static const uint32_t MAX_CODE_POINT = 0x10FFFF;
+
 	if (*(p + 1) == '#' && *(p + 2)) {
-		unsigned long ucs = 0;
-		TIXMLASSERT(sizeof(ucs) >= 4);
+		uint32_t ucs = 0;
 		ptrdiff_t delta = 0;
-		unsigned mult = 1;
+		uint32_t mult = 1;
 		static const char SEMICOLON = ';';
+
+		bool hex = false;
+		uint32_t radix = 10;
+		const char *q = 0;
+		char terminator = '#';
 
 		if (*(p + 2) == 'x') {
 			// Hexadecimal.
-			const char *q = p + 3;
-			if (!(*q)) {
-				return 0;
-			}
+			hex = true;
+			radix = 16;
+			terminator = 'x';
 
-			q = strchr(q, SEMICOLON);
-
-			if (!q) {
-				return 0;
-			}
-			TIXMLASSERT(*q == SEMICOLON);
-
-			delta = q - p;
-			--q;
-
-			while (*q != 'x') {
-				unsigned int digit = 0;
-
-				if (*q >= '0' && *q <= '9') {
-					digit = *q - '0';
-				} else if (*q >= 'a' && *q <= 'f') {
-					digit = *q - 'a' + 10;
-				} else if (*q >= 'A' && *q <= 'F') {
-					digit = *q - 'A' + 10;
-				} else {
-					return 0;
-				}
-				TIXMLASSERT(digit < 16);
-				TIXMLASSERT(digit == 0 ||
-					    mult <= UINT_MAX / digit);
-				const unsigned int digitScaled = mult * digit;
-				TIXMLASSERT(ucs <= ULONG_MAX - digitScaled);
-				ucs += digitScaled;
-				TIXMLASSERT(mult <= UINT_MAX / 16);
-				mult *= 16;
-				--q;
-			}
+			q = p + 3;
 		} else {
 			// Decimal.
-			const char *q = p + 2;
-			if (!(*q)) {
+			q = p + 2;
+		}
+		if (!(*q)) {
+			return 0;
+		}
+
+		q = strchr(q, SEMICOLON);
+		if (!q) {
+			return 0;
+		}
+		TIXMLASSERT(*q == SEMICOLON);
+
+		delta = q - p;
+		--q;
+
+		while (*q != terminator) {
+			uint32_t digit = 0;
+
+			if (*q >= '0' && *q <= '9') {
+				digit = *q - '0';
+			} else if (hex && (*q >= 'a' && *q <= 'f')) {
+				digit = *q - 'a' + 10;
+			} else if (hex && (*q >= 'A' && *q <= 'F')) {
+				digit = *q - 'A' + 10;
+			} else {
 				return 0;
 			}
+			TIXMLASSERT(digit < radix);
 
-			q = strchr(q, SEMICOLON);
+			const unsigned int digitScaled = mult * digit;
+			ucs += digitScaled;
+			mult *= radix;
 
-			if (!q) {
-				return 0;
+			// Security check: could a value exist that is out of range?
+			// Easily; limit to the MAX_CODE_POINT, which also allows for a
+			// bunch of leading zeroes.
+			if (mult > MAX_CODE_POINT) {
+				mult = MAX_CODE_POINT;
 			}
-			TIXMLASSERT(*q == SEMICOLON);
-
-			delta = q - p;
 			--q;
-
-			while (*q != '#') {
-				if (*q >= '0' && *q <= '9') {
-					const unsigned int digit = *q - '0';
-					TIXMLASSERT(digit < 10);
-					TIXMLASSERT(digit == 0 ||
-						    mult <= UINT_MAX / digit);
-					const unsigned int digitScaled =
-						mult * digit;
-					TIXMLASSERT(ucs <=
-						    ULONG_MAX - digitScaled);
-					ucs += digitScaled;
-				} else {
-					return 0;
-				}
-				TIXMLASSERT(mult <= UINT_MAX / 10);
-				mult *= 10;
-				--q;
-			}
+		}
+		// Out of range:
+		if (ucs > MAX_CODE_POINT) {
+			return 0;
 		}
 		// convert the UCS to UTF-8
 		ConvertUTF32ToUTF8(ucs, value, length);
+		if (length == 0) {
+			// If length is 0, there was an error. (Security? Bad input?)
+			// Fail safely.
+			return 0;
+		}
 		return p + delta + 1;
 	}
 	return p + 1;
@@ -599,7 +612,8 @@ void XMLUtil::ToStr(int64_t v, char *buffer, int bufferSize)
 void XMLUtil::ToStr(uint64_t v, char *buffer, int bufferSize)
 {
 	// horrible syntax trick to make the compiler happy about %llu
-	TIXML_SNPRINTF(buffer, bufferSize, "%llu", (long long)v);
+	TIXML_SNPRINTF(buffer, bufferSize, "%llu",
+		       static_cast<unsigned long long>(v));
 }
 
 bool XMLUtil::ToInt(const char *str, int *value)
@@ -692,13 +706,13 @@ bool XMLUtil::ToUnsigned64(const char *str, uint64_t *value)
 	unsigned long long v =
 		0; // horrible syntax trick to make the compiler happy about %llu
 	if (TIXML_SSCANF(str, IsPrefixHex(str) ? "%llx" : "%llu", &v) == 1) {
-		*value = (uint64_t)v;
+		*value = static_cast<uint64_t>(v);
 		return true;
 	}
 	return false;
 }
 
-char *XMLDocument::Identify(char *p, XMLNode **node)
+char *XMLDocument::Identify(char *p, XMLNode **node, bool first)
 {
 	TIXMLASSERT(node);
 	TIXMLASSERT(p);
@@ -749,9 +763,20 @@ char *XMLDocument::Identify(char *p, XMLNode **node)
 		returnNode->_parseLineNum = _parseCurLineNum;
 		p += dtdHeaderLen;
 	} else if (XMLUtil::StringEqual(p, elementHeader, elementHeaderLen)) {
-		returnNode = CreateUnlinkedNode<XMLElement>(_elementPool);
-		returnNode->_parseLineNum = _parseCurLineNum;
-		p += elementHeaderLen;
+
+		// Preserve whitespace pedantically before closing tag, when it's immediately after opening tag
+		if (WhitespaceMode() == PEDANTIC_WHITESPACE && first &&
+		    p != start && *(p + elementHeaderLen) == '/') {
+			returnNode = CreateUnlinkedNode<XMLText>(_textPool);
+			returnNode->_parseLineNum = startLine;
+			p = start; // Back it up, all the text counts.
+			_parseCurLineNum = startLine;
+		} else {
+			returnNode =
+				CreateUnlinkedNode<XMLElement>(_elementPool);
+			returnNode->_parseLineNum = _parseCurLineNum;
+			p += elementHeaderLen;
+		}
 	} else {
 		returnNode = CreateUnlinkedNode<XMLText>(_textPool);
 		returnNode->_parseLineNum =
@@ -802,6 +827,36 @@ XMLNode::~XMLNode()
 	if (_parent) {
 		_parent->Unlink(this);
 	}
+}
+
+// ChildElementCount was originally suggested by msteiger on the sourceforge page for TinyXML and modified by KB1SPH for TinyXML-2.
+
+int XMLNode::ChildElementCount(const char *value) const
+{
+	int count = 0;
+
+	const XMLElement *e = FirstChildElement(value);
+
+	while (e) {
+		e = e->NextSiblingElement(value);
+		count++;
+	}
+
+	return count;
+}
+
+int XMLNode::ChildElementCount() const
+{
+	int count = 0;
+
+	const XMLElement *e = FirstChildElement();
+
+	while (e) {
+		e = e->NextSiblingElement();
+		count++;
+	}
+
+	return count;
 }
 
 const char *XMLNode::Value() const
@@ -1039,21 +1094,23 @@ char *XMLNode::ParseDeep(char *p, StrPair *parentEndTag, int *curLineNumPtr)
 	if (_document->Error())
 		return 0;
 
+	bool first = true;
 	while (p && *p) {
 		XMLNode *node = 0;
 
-		p = _document->Identify(p, &node);
+		p = _document->Identify(p, &node, first);
 		TIXMLASSERT(p);
 		if (node == 0) {
 			break;
 		}
+		first = false;
 
 		const int initialLineNum = node->_parseLineNum;
 
 		StrPair endTag;
 		p = node->ParseDeep(p, &endTag, curLineNumPtr);
 		if (!p) {
-			DeleteNode(node);
+			_document->DeleteNode(node);
 			if (!_document->Error()) {
 				_document->SetError(XML_ERROR_PARSING,
 						    initialLineNum, 0);
@@ -1090,7 +1147,7 @@ char *XMLNode::ParseDeep(char *p, StrPair *parentEndTag, int *curLineNumPtr)
 					initialLineNum,
 					"XMLDeclaration value=%s",
 					decl->Value());
-				DeleteNode(node);
+				_document->DeleteNode(node);
 				break;
 			}
 		}
@@ -1128,7 +1185,7 @@ char *XMLNode::ParseDeep(char *p, StrPair *parentEndTag, int *curLineNumPtr)
 					XML_ERROR_MISMATCHED_ELEMENT,
 					initialLineNum, "XMLElement name=%s",
 					ele->Name());
-				DeleteNode(node);
+				_document->DeleteNode(node);
 				break;
 			}
 		}
@@ -1721,11 +1778,11 @@ XMLError XMLElement::QueryInt64Text(int64_t *ival) const
 	return XML_NO_TEXT_NODE;
 }
 
-XMLError XMLElement::QueryUnsigned64Text(uint64_t *ival) const
+XMLError XMLElement::QueryUnsigned64Text(uint64_t *uval) const
 {
 	if (FirstChild() && FirstChild()->ToText()) {
 		const char *t = FirstChild()->Value();
-		if (XMLUtil::ToUnsigned64(t, ival)) {
+		if (XMLUtil::ToUnsigned64(t, uval)) {
 			return XML_SUCCESS;
 		}
 		return XML_CAN_NOT_CONVERT_TEXT;
@@ -1875,7 +1932,7 @@ char *XMLElement::ParseAttributes(char *p, int *curLineNumPtr)
 		}
 
 		// attribute.
-		if (XMLUtil::IsNameStartChar((unsigned char)*p)) {
+		if (XMLUtil::IsNameStartChar(static_cast<unsigned char>(*p))) {
 			XMLAttribute *attrib = CreateAttribute();
 			TIXMLASSERT(attrib);
 			attrib->_parseLineNum = _document->_parseCurLineNum;
@@ -2116,7 +2173,7 @@ void XMLDocument::MarkInUse(const XMLNode *const node)
 	TIXMLASSERT(node);
 	TIXMLASSERT(node->_parent == 0);
 
-	for (int i = 0; i < _unlinked.Size(); ++i) {
+	for (size_t i = 0; i < _unlinked.Size(); ++i) {
 		if (node == _unlinked[i]) {
 			_unlinked.SwapRemove(i);
 			break;
@@ -2228,7 +2285,9 @@ static FILE *callfopen(const char *filepath, const char *mode)
 
 void XMLDocument::DeleteNode(XMLNode *node)
 {
-	TIXMLASSERT(node);
+	if (node == 0) {
+		return; // check for null pointer
+	}
 	TIXMLASSERT(node->_document == this);
 	if (node->_parent) {
 		node->_parent->DeleteChild(node);
@@ -2346,21 +2405,21 @@ XMLError XMLDocument::SaveFile(FILE *fp, bool compact)
 	return _errorID;
 }
 
-XMLError XMLDocument::Parse(const char *p, size_t len)
+XMLError XMLDocument::Parse(const char *xml, size_t nBytes)
 {
 	Clear();
 
-	if (len == 0 || !p || !*p) {
+	if (nBytes == 0 || !xml || !*xml) {
 		SetError(XML_ERROR_EMPTY_DOCUMENT, 0, 0);
 		return _errorID;
 	}
-	if (len == static_cast<size_t>(-1)) {
-		len = strlen(p);
+	if (nBytes == static_cast<size_t>(-1)) {
+		nBytes = strlen(xml);
 	}
 	TIXMLASSERT(_charBuffer == 0);
-	_charBuffer = new char[len + 1];
-	memcpy(_charBuffer, p, len);
-	_charBuffer[len] = 0;
+	_charBuffer = new char[nBytes + 1];
+	memcpy(_charBuffer, xml, nBytes);
+	_charBuffer[nBytes] = 0;
 
 	Parse();
 	if (Error()) {
@@ -2406,7 +2465,8 @@ void XMLDocument::SetError(XMLError error, int lineNum, const char *format, ...)
 	TIXMLASSERT(sizeof(error) <= sizeof(int));
 	TIXML_SNPRINTF(buffer, BUFFER_SIZE,
 		       "Error=%s ErrorID=%d (0x%x) Line number=%d",
-		       ErrorIDToName(error), int(error), int(error), lineNum);
+		       ErrorIDToName(error), static_cast<int>(error),
+		       static_cast<unsigned int>(error), lineNum);
 
 	if (format) {
 		size_t len = strlen(buffer);
@@ -2476,7 +2536,8 @@ void XMLDocument::PopDepth()
 	--_parsingDepth;
 }
 
-XMLPrinter::XMLPrinter(FILE *file, bool compact, int depth)
+XMLPrinter::XMLPrinter(FILE *file, bool compact, int depth,
+		       EscapeAposCharsInAttributes aposInAttributes)
 	: _elementJustOpened(false),
 	  _stack(),
 	  _firstElement(true),
@@ -2493,10 +2554,13 @@ XMLPrinter::XMLPrinter(FILE *file, bool compact, int depth)
 	}
 	for (int i = 0; i < NUM_ENTITIES; ++i) {
 		const char entityValue = entities[i].value;
-		const unsigned char flagIndex =
-			static_cast<unsigned char>(entityValue);
-		TIXMLASSERT(flagIndex < ENTITY_RANGE);
-		_entityFlag[flagIndex] = true;
+		if ((aposInAttributes == ESCAPE_APOS_CHARS_IN_ATTRIBUTES) ||
+		    (entityValue != SINGLE_QUOTE)) {
+			const unsigned char flagIndex =
+				static_cast<unsigned char>(entityValue);
+			TIXMLASSERT(flagIndex < ENTITY_RANGE);
+			_entityFlag[flagIndex] = true;
+		}
 	}
 	_restrictedEntityFlag[static_cast<unsigned char>('&')] = true;
 	_restrictedEntityFlag[static_cast<unsigned char>('<')] = true;
@@ -2532,7 +2596,7 @@ void XMLPrinter::Write(const char *data, size_t size)
 	if (_fp) {
 		fwrite(data, sizeof(char), size, _fp);
 	} else {
-		char *p = _buffer.PushArr(static_cast<int>(size)) -
+		char *p = _buffer.PushArr(size) -
 			  1; // back up over the null terminator.
 		memcpy(p, data, size);
 		p[size] = 0;
