@@ -31,7 +31,7 @@ private:
 	void markRAMDead();
 
 	bool probeRAMAddress(void *);
-	uint64_t scanForRAM(void* address, uint64_t size, uint64_t delim);
+	uint64_t scanForRAM(void *address, uint64_t size, uint64_t delim);
 
 	std::atomic<int32_t> inputs_;
 

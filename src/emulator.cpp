@@ -199,7 +199,7 @@ void Emulator::scanProcessRAM()
 			uint64_t regionSize = (uint64_t)m.RegionSize;
 			uint64_t _address = (uint64_t)address;
 			if (parallelStart <= _address &&
-				_address <= parallelEnd && regionSize >= 0x800000) {
+			    _address <= parallelEnd && regionSize >= 0x800000) {
 				ramPtrBase = (uint8_t *)scanForRAM(
 					address, m.RegionSize, 0x1000);
 			}
