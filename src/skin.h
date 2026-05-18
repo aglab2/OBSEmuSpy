@@ -6,6 +6,7 @@
 #include "input.h"
 #include "image.h"
 
+#include <map>
 #include <optional>
 #include <vector>
 #include <string>
@@ -94,4 +95,6 @@ public:
 private:
 	std::vector<Button> buttons_;
 	std::vector<Stick> sticks_;
+
+	std::map<char, Image> numbers_;
 };

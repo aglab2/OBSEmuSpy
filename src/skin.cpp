@@ -1,5 +1,4 @@
 #include "skin.h"
-#include "skin.h"
 
 #include "tinyxml2.h"
 
@@ -20,8 +19,7 @@ template<> const char *load(tinyxml2::XMLElement &elem, const char *name)
 }
 
 template<>
-std::optional<std::string> load(tinyxml2::XMLElement &elem,
-				       const char *name)
+std::optional<std::string> load(tinyxml2::XMLElement &elem, const char *name)
 {
 	if (auto val = load<const char *>(elem, name)) {
 		return std::string{val};
@@ -197,6 +195,21 @@ Skin::Skin(const char *_path)
 					     Coordinates{xrange, yrange});
 		} catch (...) {
 		}
+
+	try {
+		for (int i = 0; i <= 9; i++) {
+			auto imageRelPath =
+				"numbers/" + std::to_string(i) + ".png";
+			auto imagePath = path / imageRelPath;
+			numbers_[(char)('0' + i)] = Image{imagePath.c_str()};
+		}
+
+		auto imageRelPath = "numbers/-.png";
+		auto imagePath = path / imageRelPath;
+		numbers_['-'] = Image{imagePath.c_str()};
+	} catch (...) {
+		numbers_.clear();
+	}
 }
 
 void Skin::render(Input input)
@@ -220,11 +233,35 @@ void Skin::render(Input input)
 			(stick.nameY == Stick::Name::X ? input.x : input.y) /
 			127.f;
 		auto &image = stick.image;
-		obs_source_draw(image.texture(),
-				stick.pos.x + (int)((float) stick.range.x * offX),
-				stick.pos.y - (int)((float) stick.range.y * offY),
-				stick.size.x ? stick.size.x : image.cx(),
-				stick.size.y ? stick.size.y : image.cy(),
-				false);
+		obs_source_draw(
+			image.texture(),
+			stick.pos.x + (int)((float)stick.range.x * offX),
+			stick.pos.y - (int)((float)stick.range.y * offY),
+			stick.size.x ? stick.size.x : image.cx(),
+			stick.size.y ? stick.size.y : image.cy(), false);
+	}
+
+	if (!numbers_.empty()) {
+		const int mult = 3;
+		auto render = [this](int x, int y, int v) {
+			char what[10];
+			sprintf(what, "%d", v);
+
+			for (int loc = 0; what[loc]; loc++) {
+				char sym = what[loc];
+				auto it = numbers_.find(sym);
+				if (it == numbers_.end())
+					continue;
+
+				const auto &image = it->second;
+				obs_source_draw(image.texture(),
+						x + loc * 4 * mult, y,
+						image.cx() * mult,
+						image.cy() * mult, false);
+			}
+		};
+
+		render(0, 0 * mult, input.x);
+		render(0, 6 * mult, input.y);
 	}
 }
