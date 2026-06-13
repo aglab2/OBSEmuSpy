@@ -207,6 +207,7 @@ void Emulator::scanProcessRAM()
 #else
 void Emulator::searchProcess()
 {
+	msToWait_ = 1000;
 	DIR *dir = opendir("/proc");
 	while (auto entry = readdir(dir)) {
 		const char *name = entry->d_name;
@@ -246,6 +247,7 @@ void Emulator::searchProcess()
 
 void Emulator::scanProcessRAM()
 {
+	msToWait_ = 1000;
 	char mapPath[100];
 	sprintf(mapPath, "/proc/%d/maps", process_);
 
