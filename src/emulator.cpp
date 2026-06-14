@@ -37,6 +37,28 @@ Emulator::~Emulator()
 	thread_.join();
 }
 
+#ifndef _WIN32
+#define WAIT_OBJECT_0 0
+#define WaitForSingleObject(...) 1
+static bool ReadProcessMemory(pid_t pid, void *remotePtr, void *localPtr,
+			      size_t sz, void *_)
+{
+	(void)_;
+	struct iovec lvec[] = {{
+		.iov_base = localPtr,
+		.iov_len = sz,
+	}};
+	struct iovec rvec[] = {{
+		.iov_base = remotePtr,
+		.iov_len = sz,
+	}};
+
+	ssize_t nread = process_vm_readv(pid, lvec, 1, rvec, 1, 0);
+	printf("ReadProcessMemory: read %zd bytes from %p: %d\n", nread, remotePtr, errno);
+	return (ssize_t)sz == nread;
+}
+#endif
+
 #if _WIN32
 static std::string moduleNameLowerCase(HANDLE process, HMODULE module)
 {
@@ -92,23 +114,6 @@ void Emulator::searchProcess()
 		IsWow64Process(process_, &processIs64Bit_);
 		break;
 	}
-}
-
-bool Emulator::probeRAMAddress(void *ramPtrBaseCandidate)
-{
-	const uint32_t ramMagic = 0x3C1A8000;
-	const uint32_t ramMagicMask = 0xfffff000;
-
-	uint32_t value;
-	if (!ReadProcessMemory(process_, ramPtrBaseCandidate, &value,
-			       sizeof(value), nullptr))
-		return false;
-
-	if ((value & ramMagicMask) == ramMagic) {
-		return true;
-	}
-
-	return false;
 }
 
 void Emulator::scanProcessRAM()
@@ -205,6 +210,29 @@ void Emulator::scanProcessRAM()
 }
 #define translateInputs(x) x
 #else
+bool Emulator::probeRAMAddress(void *ramPtrBaseCandidate)
+{
+	const uint32_t ramMagic = 0x3C1A8000;
+	const uint32_t ramMagicMask = 0xfffff000;
+
+	printf("Probing RAM address %p\n", ramPtrBaseCandidate);
+
+	uint32_t value;
+	if (!ReadProcessMemory(process_, ramPtrBaseCandidate, &value,
+			       sizeof(value), nullptr))
+		return false;
+	
+	printf("Probing RAM address %p, read value 0x%08x\n", ramPtrBaseCandidate, value);
+
+	if ((value & ramMagicMask) == ramMagic) {
+		printf("Found RAM base at %p\n", ramPtrBaseCandidate);
+		return true;
+	}
+
+	printf("Address %p is not RAM\n", ramPtrBaseCandidate);
+	return false;
+}
+
 void Emulator::searchProcess()
 {
 	msToWait_ = 1000;
@@ -233,11 +261,13 @@ void Emulator::searchProcess()
 			continue;
 
 		std::string_view commSV{comm, (size_t)sz - 1};
-		static std::string_view searchCommSV = "dolphin-emu";
-		if (commSV != searchCommSV)
+
+		bool isDolphin = commSV == "dolphin-emu";
+		bool isPJ64 = commSV == "Project64.exe";
+		if (!isDolphin && !isPJ64)
 			continue;
 
-		type_ = EmulatorType::DOLPHIN;
+		type_ = isDolphin ? EmulatorType::DOLPHIN : EmulatorType::PJ64;
 		pid_ = pid;
 		processIs64Bit_ = true;
 		break;
@@ -245,18 +275,8 @@ void Emulator::searchProcess()
 	closedir(dir);
 }
 
-void Emulator::scanProcessRAM()
+void Emulator::scanDolphinRAM(std::ifstream &file)
 {
-	msToWait_ = 1000;
-	char mapPath[100];
-	sprintf(mapPath, "/proc/%d/maps", process_);
-
-	std::ifstream file(mapPath);
-	if (!file.is_open()) {
-		markProcessDead();
-		return;
-	}
-
 	std::string line;
 	std::string needle = "/bin/dolphin-emu";
 	while (std::getline(file, line)) {
@@ -294,22 +314,78 @@ void Emulator::scanProcessRAM()
 	}
 }
 
-#define WAIT_OBJECT_0 0
-#define WaitForSingleObject(...) 1
-static bool ReadProcessMemory(pid_t pid, void *remotePtr, void *localPtr,
-			      size_t sz, void *_)
+void Emulator::scanProject64RAM(std::ifstream &file)
 {
-	(void)_;
-	struct iovec lvec[] = {{
-		.iov_base = localPtr,
-		.iov_len = sz,
-	}};
-	struct iovec rvec[] = {{
-		.iov_base = remotePtr,
-		.iov_len = sz,
-	}};
+	std::string line;
+	uint8_t *ramPtrBase = nullptr;
+	while (std::getline(file, line)) {
+		// 02480000-02660000 rwxs 00000000 00:01 6365                               /memfd:wine-mapping (deleted)
+		auto dash = line.find('-');
+		if (dash == std::string::npos)
+			continue;
+		auto space = line.find(' ');
+		if (space == std::string::npos)
+			continue;
 
-	return (ssize_t)sz == process_vm_readv(pid, lvec, 1, rvec, 1, 0);
+		std::string_view lineSV{line};
+		std::string_view perms = lineSV.substr(space + 1, 4); // rw-p
+		if (perms.length() != 4)
+			continue;
+
+		if ('w' != perms[1] && 'r' != perms[0])
+			continue;
+
+		std::string startStr = line.substr(0, dash); // 55a832538000
+		uint64_t start = strtoul(startStr.c_str(), nullptr, 16);
+		uint64_t end =
+			strtoul(line.substr(dash + 1, space - dash - 1).c_str(),
+				nullptr, 16);
+
+		if (end - start < 0x400000)
+			continue;
+
+		uint8_t *ramPtrBaseCandidate = (uint8_t *)start;
+		if (probeRAMAddress(ramPtrBaseCandidate)) {
+			ramPtrBase = ramPtrBaseCandidate;
+			break;
+		}
+	}
+
+	if (!ramPtrBase)
+		return;
+
+	std::vector<uint32_t> ram;
+	ram.resize(0x100000);
+	if (!ReadProcessMemory(process_, ramPtrBase, ram.data(), 0x400000,
+			       nullptr))
+		return;
+
+	analyzeResult_ = MIPS::analyze(ram);
+	if (!analyzeResult_)
+		return;
+
+	ramPtrBase_ = ramPtrBase;
+}
+
+void Emulator::scanProcessRAM()
+{
+	msToWait_ = 1000;
+	char mapPath[100];
+	sprintf(mapPath, "/proc/%d/maps", process_);
+
+	std::ifstream file(mapPath);
+	if (!file.is_open()) {
+		markProcessDead();
+		return;
+	}
+
+	if (type_ == EmulatorType::DOLPHIN) {
+		scanDolphinRAM(file);
+	} else if (type_ == EmulatorType::PJ64) {
+		scanProject64RAM(file);
+	} else {
+		markProcessDead();
+	}
 }
 
 enum N64Name {
@@ -333,22 +409,22 @@ enum N64Name {
 };
 
 enum DolphinName {
-	GC_A, // N64_CRight
-	GC_B, // N64_CLeft
-	GC_X, // N64_CDown
-	GC_Y, // N64_CUp
+	GC_A,     // N64_CRight
+	GC_B,     // N64_CLeft
+	GC_X,     // N64_CDown
+	GC_Y,     // N64_CUp
 	GC_Start, // N64_R
 	GC_CLeft, // N64_L
 	GC_CDown, // N64_X
-	GC_CUp, // N64_Y
+	GC_CUp,   // N64_Y
 
-	GC_Left, // N64_Right
-	GC_Right, // N64_Left
-	GC_Down, // N64_Down
-	GC_Up, // N64_Up
-	GC_Z, // N64_Start
-	GC_R, // N64_Z
-	GC_L, // N64_B
+	GC_Left,   // N64_Right
+	GC_Right,  // N64_Left
+	GC_Down,   // N64_Down
+	GC_Up,     // N64_Up
+	GC_Z,      // N64_Start
+	GC_R,      // N64_Z
+	GC_L,      // N64_B
 	GC_CRight, // N64_A
 };
 
@@ -362,7 +438,10 @@ static uint32_t translateInput(uint32_t value)
 	input.y -= 0x80;
 
 	uint16_t dolphinFlags = 0;
-#define TRANSLATE(flag) if (input.flags & (1 << GC_##flag)) { dolphinFlags |= (1 << N64_##flag); }
+#define TRANSLATE(flag)                            \
+	if (input.flags & (1 << GC_##flag)) {      \
+		dolphinFlags |= (1 << N64_##flag); \
+	}
 	TRANSLATE(CRight)
 	TRANSLATE(CLeft)
 	TRANSLATE(CDown)
@@ -428,7 +507,10 @@ int32_t Emulator::feedInputs()
 		return 0;
 	}
 
-	return translateInput(inputs);
+	if (EmulatorType::DOLPHIN == type_) {
+		return translateInput(inputs);
+	}
+	return inputs;
 }
 
 void Emulator::work()

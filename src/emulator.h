@@ -27,6 +27,8 @@ private:
 	void work();
 
 	void searchProcess();
+	void scanDolphinRAM(std::ifstream& file);
+	void scanProject64RAM(std::ifstream& file);
 	void scanProcessRAM();
 	int32_t feedInputs();
 
