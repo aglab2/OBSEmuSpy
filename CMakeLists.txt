@@ -38,6 +38,7 @@ target_sources(
   ${CMAKE_PROJECT_NAME}
   PRIVATE src/dispatch_queue.cpp
           src/dispatch_queue.h
+          src/elevator.cpp
           src/emulator.cpp
           src/emulator.h
           src/emuspy-source.cpp

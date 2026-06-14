@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "input.h"
+#include "elevator.h"
 #endif
 
 #include <algorithm>
@@ -54,7 +55,13 @@ static bool ReadProcessMemory(pid_t pid, void *remotePtr, void *localPtr,
 	}};
 
 	ssize_t nread = process_vm_readv(pid, lvec, 1, rvec, 1, 0);
-	printf("ReadProcessMemory: read %zd bytes from %p: %d\n", nread, remotePtr, errno);
+	if (nread < 0 && errno == EPERM) {
+		if (!gElevator)
+			gElevator = new Elevator;
+
+		nread = gElevator->processRead(pid, remotePtr, localPtr, sz);
+	}
+
 	return (ssize_t)sz == nread;
 }
 #endif

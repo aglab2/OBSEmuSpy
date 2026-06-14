@@ -20,6 +20,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <plugin-support.h>
 
 #include "dispatch_queue.h"
+#include "elevator.h"
 #include "emuspy-source.h"
 
 OBS_DECLARE_MODULE()
@@ -42,4 +43,6 @@ void obs_module_unload(void)
 {
 	obs_log(LOG_INFO, "plugin unloaded");
 	delete gTeardownQueue;
+	if (gElevator)
+		delete gElevator;
 }
